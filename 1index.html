@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Séances">
+<title>Séances</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 12px; background: #f4f4f4; color: #111; }
+  h1 { font-size: 20px; margin: 4px 0 12px; }
+  .card { background: #fff; border-radius: 10px; padding: 10px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  .card h2 { font-size: 16px; margin: 0 0 2px; }
+  .meta { font-size: 13px; color: #555; margin-bottom: 8px; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ddd; padding: 3px; text-align: center; font-size: 13px; }
+  th { background: #f0f0f0; }
+  td.serie, th.serie { position: sticky; left: 0; background: #fafafa; text-align: left; min-width: 110px; z-index: 1; }
+  td.serie small { display: block; color: #0a5; font-weight: 600; }
+  input { width: 58px; font-size: 16px; padding: 6px 2px; border: 1px solid #ccc; border-radius: 6px; text-align: center; }
+  input.d { width: 72px; }
+  input:focus { outline: 2px solid #2a7de1; }
+  .tools { margin-top: 20px; }
+  button { font-size: 15px; padding: 8px 12px; margin-right: 8px; border-radius: 8px; border: 1px solid #999; background: #fff; }
+  textarea { width: 100%; height: 90px; margin-top: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Séance full body</h1>
+<div id="app"></div>
+
+<div class="tools">
+  <button id="exp">Exporter</button>
+  <button id="imp">Importer</button>
+  <textarea id="box" placeholder="Export : copiez ce texte. Import : collez-le ici puis appuyez sur Importer."></textarea>
+</div>
+
+<script>
+// ---- Données des exercices (prototype : exercices 1 et 4) ----
+// type "duree" : une case par série ; type "chgrep" : deux cases (Chg, Rep) par série
+const NB_ENTRAINEMENTS = 8;
+const EXERCICES = [
+  { id: "ex1", titre: "1 - Tapis roulant ou elliptique", type: "duree", series: 1,
+    prescrit: "15:00", repos: "" },
+  { id: "ex4", titre: "4 - Lat pulldown prise supination", type: "chgrep", series: 4,
+    prescrit: "12-15 rép × 30 kg", repos: "Repos 01:30",
+    consigne: "Garder le dos droit. Prise supination." }
+];
+
+const KEY = "seances-fullbody-v1";
+let data = {};
+try { data = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { data = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+
+function cle(ex, serie, ent, champ) { return [ex, serie, ent, champ].join("|"); }
+
+function champ(ex, serie, ent, champ, cls, mode, ph) {
+  const k = cle(ex, serie, ent, champ);
+  const i = document.createElement("input");
+  i.type = "text"; i.className = cls || ""; i.value = data[k] || "";
+  i.inputMode = mode; i.placeholder = ph || ""; i.autocomplete = "off";
+  i.addEventListener("input", () => {
+    if (i.value === "") delete data[k]; else data[k] = i.value;
+    save();
+  });
+  return i;
+}
+
+const app = document.getElementById("app");
+EXERCICES.forEach(ex => {
+  const card = document.createElement("div"); card.className = "card";
+  card.innerHTML = "<h2></h2><div class='meta'></div><div class='scroll'></div>";
+  card.querySelector("h2").textContent = ex.titre;
+  card.querySelector(".meta").textContent =
+    [ex.consigne, ex.repos].filter(Boolean).join(" · ");
+  const t = document.createElement("table");
+
+  // En-têtes
+  let h1 = "<tr><th class='serie'>Entraîn.</th>", h2 = "";
+  for (let e = 1; e <= NB_ENTRAINEMENTS; e++) {
+    h1 += ex.type === "chgrep" ? `<th colspan='2'>${e}</th>` : `<th>${e}</th>`;
+  }
+  h1 += "</tr>";
+  if (ex.type === "chgrep") {
+    h2 = "<tr><th class='serie'></th>";
+    for (let e = 1; e <= NB_ENTRAINEMENTS; e++) h2 += "<th>Chg</th><th>Rep</th>";
+    h2 += "</tr>";
+  }
+  t.innerHTML = h1 + h2;
+
+  // Lignes de séries
+  for (let s = 1; s <= ex.series; s++) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("td"); th.className = "serie";
+    th.innerHTML = `Série ${s}<small>${ex.prescrit}</small>`;
+    tr.appendChild(th);
+    for (let e = 1; e <= NB_ENTRAINEMENTS; e++) {
+      if (ex.type === "chgrep") {
+        const c1 = document.createElement("td"), c2 = document.createElement("td");
+        c1.appendChild(champ(ex.id, s, e, "chg", "", "decimal", "kg"));
+        c2.appendChild(champ(ex.id, s, e, "rep", "", "numeric", "rép"));
+        tr.appendChild(c1); tr.appendChild(c2);
+      } else {
+        const c = document.createElement("td");
+        c.appendChild(champ(ex.id, s, e, "duree", "d", "text", "mm:ss"));
+        tr.appendChild(c);
+      }
+    }
+    t.appendChild(tr);
+  }
+  card.querySelector(".scroll").appendChild(t);
+  app.appendChild(card);
+});
+
+// ---- Export / import (copie de secours) ----
+const box = document.getElementById("box");
+document.getElementById("exp").onclick = () => {
+  box.value = JSON.stringify(data);
+  box.select();
+};
+document.getElementById("imp").onclick = () => {
+  try {
+    const d = JSON.parse(box.value);
+    if (typeof d !== "object" || d === null) throw 0;
+    if (!confirm("Remplacer les données actuelles par celles collées ?")) return;
+    data = d; save(); location.reload();
+  } catch (e) { alert("Texte invalide."); }
+};
+</script>
+</body>
+</html>
