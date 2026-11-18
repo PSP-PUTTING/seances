@@ -24,6 +24,12 @@
   select { width: 62px; font-size: 16px; padding: 6px 0; border: 1px solid #ccc; border-radius: 6px; background: #fff; color: #111; }
   select.d { width: 84px; }
   select.rempli { background: #e8f3ff; border-color: #2a7de1; }
+  select.res { width: 100%; min-width: 96px; background: #eee; border-color: #aaa; }
+  select.res.f { background: #e3f6e8; border-color: #2f9e55; }
+  select.res.d { background: #fde6e6; border-color: #d14343; }
+  .ligne { margin: 8px 0; font-size: 15px; }
+  #dest { font-size: 16px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; width: 200px; }
+  #syn-texte { height: 190px; background: #f6f6f6; margin: 8px 0; }
   select:focus { outline: 2px solid #2a7de1; }
   .tools { margin-top: 20px; }
   button { font-size: 15px; padding: 8px 12px; margin-right: 8px; border-radius: 8px; border: 1px solid #999; background: #fff; }
@@ -33,6 +39,15 @@
 <body>
 <h1>Séance full body</h1>
 <div id="app"></div>
+
+<div class="card" id="syn">
+  <h2>Synthèse pour le coach</h2>
+  <div class="meta">Choisissez les entraînements à envoyer.</div>
+  <div class="ligne">De l'entraînement <select id="de"></select> à <select id="a"></select></div>
+  <div class="ligne">Destinataire <input id="dest" type="tel" inputmode="tel" placeholder="06 12 34 56 78" autocomplete="off"></div>
+  <textarea id="syn-texte" readonly></textarea>
+  <button id="env">Envoyer par message</button><button id="cop">Copier</button>
+</div>
 
 <div class="tools">
   <button id="exp">Exporter</button>
@@ -115,9 +130,40 @@ function liste_deroulante(ex, serie, ent, ch, def, cls) {
   maj();
   s.addEventListener("change", () => {
     if (s.value === "") delete data[k]; else data[k] = s.value;
-    save(); maj();
+    save(); maj(); majRes(ex, ent); majSynthese();
   });
   return s;
+}
+
+// ---- Ressenti (visage + mot) ----
+const RESSENTIS = [
+  { v: "facile", label: "Facile", emoji: "😄" },
+  { v: "bien",   label: "Bien",   emoji: "😐" },
+  { v: "dur",    label: "Dur",    emoji: "😖" }
+];
+const EX_PAR_ID = Object.fromEntries(EXERCICES.map(x => [x.id, x]));
+const RES = {};   // listes de ressenti : "exN|entraînement" -> <select>
+
+function aDesValeurs(ex, e) {
+  for (let s = 1; s <= ex.series; s++)
+    for (const ch of ["chg", "rep", "duree"])
+      if (data[cle(ex.id, s, e, ch)]) return true;
+  return false;
+}
+// Ressenti visible seulement s'il y a des valeurs ; "Bien" par défaut (non enregistré tant qu'on n'a rien choisi)
+function majRes(exId, e) {
+  const ex = EX_PAR_ID[exId], sel = RES[exId + "|" + e];
+  if (!sel) return;
+  const k = cle(exId, "res", e, "ressenti");
+  if (aDesValeurs(ex, e)) {
+    sel.style.visibility = "visible";
+    sel.value = data[k] || "bien";
+  } else {
+    sel.style.visibility = "hidden";
+    if (k in data) { delete data[k]; save(); }
+  }
+  sel.classList.toggle("f", sel.value === "facile");
+  sel.classList.toggle("d", sel.value === "dur");
 }
 
 const app = document.getElementById("app");
@@ -159,9 +205,88 @@ EXERCICES.forEach(ex => {
     }
     t.appendChild(tr);
   }
+  // Ligne Ressenti (sous la dernière série)
+  const trR = document.createElement("tr");
+  const thR = document.createElement("td"); thR.className = "serie"; thR.textContent = "Ressenti";
+  trR.appendChild(thR);
+  for (let e = 1; e <= NB_ENTRAINEMENTS; e++) {
+    const c = document.createElement("td");
+    if (ex.type === "chgrep") c.colSpan = 2;
+    const sel = document.createElement("select"); sel.className = "res";
+    RESSENTIS.forEach(r => {
+      const o = document.createElement("option");
+      o.value = r.v; o.textContent = r.emoji + " " + r.label; sel.appendChild(o);
+    });
+    sel.addEventListener("change", () => {
+      data[cle(ex.id, "res", e, "ressenti")] = sel.value; save();
+      majRes(ex.id, e); majSynthese();
+    });
+    RES[ex.id + "|" + e] = sel;
+    c.appendChild(sel); trR.appendChild(c);
+  }
+  t.appendChild(trR);
   card.querySelector(".scroll").appendChild(t);
   app.appendChild(card);
 });
+
+// ---- Synthèse pour le coach ----
+const zone = document.getElementById("syn-texte");
+const selDe = document.getElementById("de"), selA = document.getElementById("a");
+const dest = document.getElementById("dest");
+for (let i = 1; i <= NB_ENTRAINEMENTS; i++) {
+  selDe.add(new Option(i, i)); selA.add(new Option(i, i));
+}
+selDe.value = "1"; selA.value = "4";
+try { dest.value = localStorage.getItem("seances-dest") || ""; } catch (e) {}
+dest.addEventListener("input", () => { try { localStorage.setItem("seances-dest", dest.value); } catch (e) {} });
+selDe.addEventListener("change", () => { if (+selDe.value > +selA.value) selA.value = selDe.value; majSynthese(); });
+selA.addEventListener("change", () => { if (+selA.value < +selDe.value) selDe.value = selA.value; majSynthese(); });
+
+function construireSynthese(a, b) {
+  const L = ["Synthèse full body, " + (a === b ? "entraînement " + a : "entraînements " + a + " à " + b),
+             "(charge en kg × répétitions ; durées en min ou s)", ""];
+  let any = false;
+  EXERCICES.forEach(ex => {
+    const bloc = [];
+    for (let e = a; e <= b; e++) {
+      if (!aDesValeurs(ex, e)) continue;
+      const vals = [];
+      for (let s = 1; s <= ex.series; s++) {
+        if (ex.type === "chgrep") {
+          const c = data[cle(ex.id, s, e, "chg")], r = data[cle(ex.id, s, e, "rep")];
+          vals.push((c || "–") + "×" + (r || "–"));
+        } else {
+          const d = data[cle(ex.id, s, e, "duree")];
+          vals.push(d ? d + ex.lDuree.unite : "–");
+        }
+      }
+      while (vals.length > 1 && /^[–×]+$/.test(vals[vals.length - 1])) vals.pop();   // séries vides en fin de liste
+      const rv = RESSENTIS.find(x => x.v === (data[cle(ex.id, "res", e, "ressenti")] || "bien"));
+      bloc.push("Entr. " + e + " : " + vals.join(", ") + ". Ressenti : " + rv.emoji + " " + rv.label);
+    }
+    if (bloc.length) { any = true; L.push(ex.titre); bloc.forEach(x => L.push(x)); L.push(""); }
+  });
+  if (!any) L.push("Aucune donnée saisie sur cette plage.");
+  return L.join("\n").trim();
+}
+function majSynthese() { zone.value = construireSynthese(+selDe.value, +selA.value); }
+
+document.getElementById("env").onclick = () => {
+  majSynthese();
+  const n = dest.value.replace(/[^\d+]/g, "");
+  location.href = "sms:" + n + "&body=" + encodeURIComponent(zone.value);
+};
+document.getElementById("cop").onclick = () => {
+  majSynthese();
+  const b = document.getElementById("cop");
+  const ok = () => { b.textContent = "Copié"; setTimeout(() => b.textContent = "Copier", 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(zone.value).then(ok, () => { zone.select(); });
+  else { zone.select(); document.execCommand("copy"); ok(); }
+};
+
+// Initialisation : ressenti selon les valeurs déjà enregistrées, puis synthèse
+EXERCICES.forEach(ex => { for (let e = 1; e <= NB_ENTRAINEMENTS; e++) majRes(ex.id, e); });
+majSynthese();
 
 // ---- Export / import (copie de secours) ----
 const box = document.getElementById("box");
